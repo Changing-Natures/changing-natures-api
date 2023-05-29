@@ -13,6 +13,8 @@ const pool = mysql.createPool({
 
 const promisePool = pool.promise();
 
+const REFERENCE_FIELDS = ['topics', 'rawMaterials', 'processedMaterials', 'practices', 'emotions'];
+
 async function getAssociatedData(data, field) {
     if (data[field] && data[field].length > 0) {
         // All associated data is stored in the open_list_values table
@@ -41,8 +43,7 @@ app.get('/participations/embedded', async (req, res) => {
         // Fetch the associated data and linked observations and media for each participation
         const promises = participations.map(async (participation) => {
             const data = JSON.parse(participation.data);
-            const fields = ['topics', 'rawMaterials', 'processedMaterials', 'practices', 'emotions'];
-            for (const field of fields) {
+            for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
 
@@ -97,8 +98,7 @@ app.get('/participations/:id/embedded', async (req, res) => {
             const data = JSON.parse(participation.data);
 
             // Fetch the associated data for each field
-            const fields = ['topics', 'rawMaterials', 'processedMaterials', 'practices', 'emotions'];
-            for (const field of fields) {
+            for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
 
