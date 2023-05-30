@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const { syncSanity } = require('./sanity');
 const mysql = require('mysql2');
 const app = express();
 const port = 3000;
@@ -125,6 +126,43 @@ app.get('/participations/:id/embedded', async (req, res) => {
         res.status(500).send('An error occurred while retrieving data.');
     }
 });
+
+app.get('/sync', async (req, res) => {
+    try {
+        const [participations] = await promisePool.query('SELECT * FROM participations');
+
+        // Fetch the associated data and linked observations and media for each participation
+        const promises = participations.map(async (participation) => {
+            const data = JSON.parse(participation.data);
+            for (const field of REFERENCE_FIELDS) {
+                participation.data = await getAssociatedData(data, field);
+            }
+
+            const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
+            const observationPromises = observations.map(async (observation) => {
+                const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
+                const mediaPromises = observationMedia.map(async (media) => {
+                    const [mediaRecord] = await promisePool.query('SELECT * FROM medias WHERE id = ?', [media.media_id]);
+                    media.mediaRecord = mediaRecord[0];
+                });
+                await Promise.all(mediaPromises);
+                observation.observationMedia = observationMedia;
+            });
+            await Promise.all(observationPromises);
+            participation.observations = observations;
+
+            return participation;
+        });
+
+        const results = await Promise.all(promises);
+        await syncSanity(results);
+        res.json(results);
+    } catch (err) {
+        console.error('An error occurred while retrieving data:', err);
+        res.status(500).send('An error occurred while retrieving data.');
+    }
+
+})
 
 app.listen(port, () => {
     console.log(`App listening at http://localhost:${port}`);
