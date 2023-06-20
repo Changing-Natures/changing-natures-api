@@ -37,6 +37,10 @@ const syncSanity = async (posts) => {
                 const processedMaterials = post.data.processedMaterials?.map(item => item.title);
                 const topics = post.data.topics?.map(item => item.title);
                 const emotions = post.data.emotions?.map(item => item.title);
+                const events = post.events;
+
+                console.log('post.id', post.id)
+                console.log('events', events)
 
                 // TODO: check for undefined
                 const doc = {
@@ -57,6 +61,7 @@ const syncSanity = async (posts) => {
                     // media: post.data.observations?.map(observation => observation.observationMedia?.map(mediaRecord => mediaRecord.name)) || [],
                     topics,
                     emotions,
+                    events,
                     date: new Date(post.created_at),
                     uploaderName: post.user_id.toString(),
                     slug: {
@@ -65,10 +70,21 @@ const syncSanity = async (posts) => {
                     },
                 };
 
-                // TODO: Add media: observations => observationsMedia => mediaRecord.name
+                // Check if document already exists
+                const existingDoc = await client.fetch(`*[_id == "${doc._id}"]`);
 
-                const response = await client.createOrReplace(doc);
-                console.log('Document created with ID:', response._id);
+                if (existingDoc.length === 0) {
+                    // Document doesn't exist, create it
+                    const response = await client.create(doc);
+                    console.log('Document created with ID:', response._id);
+                } else {
+                    // Document exists, patch it
+                    const response = await client
+                        .patch(doc._id)
+                        .set(doc)
+                        .commit();
+                    console.log('Document updated with ID:', response._id);
+                }
             }
         }
     } catch (err) {

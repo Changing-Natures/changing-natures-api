@@ -4,6 +4,7 @@ const { syncSanity } = require('./sanity');
 const mysql = require('mysql2');
 const app = express();
 const port = 3000;
+const { v4: uuidv4 } = require('uuid');
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -131,13 +132,15 @@ app.get('/sync', async (req, res) => {
     try {
         const [participations] = await promisePool.query('SELECT * FROM participations');
 
-        // Fetch the associated data and linked observations and media for each participation
         const promises = participations.map(async (participation) => {
+            // Fetch the associated data and linked observations and media for each participation
+
             const data = JSON.parse(participation.data);
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
 
+            // Fetch linked observations and media for each participation
             const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
             const observationPromises = observations.map(async (observation) => {
                 const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
@@ -151,17 +154,35 @@ app.get('/sync', async (req, res) => {
             await Promise.all(observationPromises);
             participation.observations = observations;
 
+            // Fetch associated events for each participation
+            const [events] = await promisePool.query('SELECT data, geodata, geocoding_data FROM events WHERE participation_id = ?', [participation.id]);
+
+            const parsedEvents = events.map((event) => {
+                const eventData = JSON.parse(event.data);
+                return {
+                    _key: uuidv4(),
+                    title_fr: eventData.names.fr,
+                    title_en: eventData.names.en,
+                    title_de: eventData.names.de,
+                    startYear: eventData.startYear,
+                    endYear: eventData.endYear,
+                    geodata: event.geocoding_data || event.geodata,
+                };
+            });
+            participation.events = parsedEvents;
+
             return participation;
         });
 
         const results = await Promise.all(promises);
+        console.log(results)
+        console.log('Syncing to Sanity...')
         await syncSanity(results);
         res.json(results);
     } catch (err) {
         console.error('An error occurred while retrieving data:', err);
         res.status(500).send('An error occurred while retrieving data.');
     }
-
 })
 
 app.listen(port, () => {
