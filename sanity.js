@@ -39,9 +39,6 @@ const syncSanity = async (posts) => {
                 const emotions = post.data.emotions?.map(item => item.title);
                 const events = post.events;
 
-                console.log('post.id', post.id)
-                console.log('events', events)
-
                 // TODO: check for undefined
                 const doc = {
                     _id: "collection-item-" + post.id,
@@ -58,7 +55,6 @@ const syncSanity = async (posts) => {
                     rawMaterials,
                     processedMaterials,
                     media: getMediaNames(post),
-                    // media: post.data.observations?.map(observation => observation.observationMedia?.map(mediaRecord => mediaRecord.name)) || [],
                     topics,
                     emotions,
                     events,

@@ -175,8 +175,6 @@ app.get('/sync', async (req, res) => {
         });
 
         const results = await Promise.all(promises);
-        console.log(results)
-        console.log('Syncing to Sanity...')
         await syncSanity(results);
         res.json(results);
     } catch (err) {
