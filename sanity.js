@@ -37,12 +37,14 @@ const syncSanity = async (posts) => {
                 const processedMaterials = post.data.processedMaterials?.map(item => item.title);
                 const topics = post.data.topics?.map(item => item.title);
                 const emotions = post.data.emotions?.map(item => item.title);
+                const practices = post.data.practices?.map(item => item.title);
                 const events = post.events;
 
                 // TODO: check for undefined
                 const doc = {
                     _id: "collection-item-" + post.id,
                     _type: 'collectionItem',
+                    collectionItemId: post.id,
                     title: post.data.titles?.en || "",
                     title_fr: post.data.titles?.fr || "",
                     title_de: post.data.titles?.de || "",
@@ -57,9 +59,10 @@ const syncSanity = async (posts) => {
                     media: getMediaNames(post),
                     topics,
                     emotions,
+                    practices,
                     events,
                     date: new Date(post.created_at),
-                    uploaderName: post.user_id.toString(),
+                    uploaderName: post.userName || post.user_id.toString() || "",
                     slug: {
                         _type: 'slug',
                         current: post.data.titles?.en.split(' ').join('-').toLowerCase(),
