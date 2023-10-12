@@ -33,11 +33,36 @@ const REFERENCE_FIELDS = ['topics', 'rawMaterials', 'processedMaterials', 'pract
  */
 async function getAssociatedData(data, field) {
     if (data[field] && data[field].length > 0) {
-        // All associated data is stored in the open_list_values table
+        // Use JOIN to get translations
+        const [rows] = await promisePool.query(`
+            SELECT olv.*, olt.language, olt.title as translated_title 
+            FROM open_list_values olv
+            LEFT JOIN open_list_values_translations olt ON olv.id = olt.open_list_value_id
+            WHERE olv.id IN (?)
+        `, [data[field]]);
 
-        // Parameterizing the query to prevent SQL injection attacks.
-        const [rows] = await promisePool.query(`SELECT * FROM open_list_values WHERE id IN (?)`, [data[field]]);
-        data[field] = rows;
+        // Organize the data and translations
+        const organizedRows = rows.reduce((acc, curr) => {
+            if (!acc[curr.id]) {
+                acc[curr.id] = {
+                    id: curr.id,
+                    type: curr.type,
+                    original_language: curr.original_language,
+                    title: curr.title,
+                    created_at: curr.created_at,
+                    updated_at: curr.updated_at,
+                    deleted_at: curr.deleted_at,
+                    parent_id: curr.parent_id,
+                    translations: {}
+                };
+            }
+            if (curr.language && curr.translated_title) {
+                acc[curr.id].translations[curr.language] = curr.translated_title;
+            }
+            return acc;
+        }, {});
+
+        data[field] = Object.values(organizedRows);
     }
     return data;
 }
@@ -52,14 +77,10 @@ async function getAssociatedData(data, field) {
  */
 app.get('/participations', async (req, res) => {
     try {
-        // Assumes 'promisePool' is an external connection pool to the database.
-        // Make sure to sanitize or validate any direct inputs to avoid SQL injection vulnerabilities.
         const [rows] = await promisePool.query('SELECT * FROM participations');
         res.json(rows);
     } catch (err) {
         console.error('An error occurred while retrieving data:', err);
-
-        // For production environments, avoid sending technical error details to the client for security reasons.
         res.status(500).send('An error occurred while retrieving data.');
     }
 });

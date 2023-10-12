@@ -52,15 +52,46 @@ const syncSanity = async (posts) => {
                 const practices = post.data.practices?.map(item => item.title);
                 const events = post.events;
 
+                const generateKeyedIntl = (item) => ({
+                    _key: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+                    ...item.translations
+                });
+
+                const rawMaterialsIntl = post.data.rawMaterials?.map(generateKeyedIntl);
+                const processedMaterialsIntl = post.data.processedMaterials?.map(generateKeyedIntl);
+                const topicsIntl = post.data.topics?.map(generateKeyedIntl);
+                const emotionsIntl = post.data.emotions?.map(generateKeyedIntl);
+                const practicesIntl = post.data.practices?.map(generateKeyedIntl);
+
                 const doc = {
                     _id: "collection-item-" + post.id,
                     _type: 'collectionItem',
                     collectionItemId: post.id,
                     title: post.data.titles?.en || "",
-                    // ... (rest of the fields remain unchanged)
+                    title_fr: post.data.titles?.fr || "",
+                    title_de: post.data.titles?.de || "",
+                    story_en: post.data.cleanStories?.en || "",
+                    story_fr: post.data.cleanStories?.fr || "",
+                    story_de: post.data.cleanStories?.de || "",
+                    habitat: post.data.habitats[0] || "",
+                    location: post.data.location || "",
+                    rawMaterials,
+                    processedMaterials,
+                    topics,
+                    emotions,
+                    practices,
+                    rawMaterialsIntl,
+                    processedMaterialsIntl,
+                    topicsIntl,
+                    emotionsIntl,
+                    practicesIntl,
+                    media: getMediaNames(post),
+                    events,
+                    date: new Date(post.created_at),
+                    uploaderName: post.userName || post.user_id.toString() || "",
                     slug: {
                         _type: 'slug',
-                        current: post.data.titles?.en?.split(' ').join('-').toLowerCase() || "",
+                        current: post.data.titles?.en.split(' ').join('-').toLowerCase(),
                     },
                 };
 
