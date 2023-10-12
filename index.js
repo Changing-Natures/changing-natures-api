@@ -1,10 +1,15 @@
 require('dotenv').config();
+const Replicate = require("replicate");
 const express = require('express');
 const { syncSanity } = require('./sanity');
 const mysql = require('mysql2');
 const app = express();
 const port = 3000;
 const { v4: uuidv4 } = require('uuid');
+
+// -------------------------------
+// CHANGING NATURES DATABASE
+// -------------------------------
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -17,27 +22,56 @@ const promisePool = pool.promise();
 
 const REFERENCE_FIELDS = ['topics', 'rawMaterials', 'processedMaterials', 'practices', 'emotions'];
 
+/**
+ * Fetches associated data for a given field from the `open_list_values` table.
+ * @async
+ * @function
+ * @param {Object} data - The data object that contains the field for which associated data should be fetched.
+ * @param {string} field - The field name within the data object for which associated data is required.
+ * @returns {Promise<Object>} The updated data object with the associated data for the specified field.
+ * @throws {Error} Throws an error if there's a problem querying the database.
+ */
 async function getAssociatedData(data, field) {
     if (data[field] && data[field].length > 0) {
         // All associated data is stored in the open_list_values table
+
+        // Parameterizing the query to prevent SQL injection attacks.
         const [rows] = await promisePool.query(`SELECT * FROM open_list_values WHERE id IN (?)`, [data[field]]);
         data[field] = rows;
     }
     return data;
 }
 
-// Raw participation data (all records)
+/**
+ * Handles GET requests to fetch all participations.
+ * @function
+ * @async
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @returns {void}
+ */
 app.get('/participations', async (req, res) => {
     try {
+        // Assumes 'promisePool' is an external connection pool to the database.
+        // Make sure to sanitize or validate any direct inputs to avoid SQL injection vulnerabilities.
         const [rows] = await promisePool.query('SELECT * FROM participations');
         res.json(rows);
     } catch (err) {
         console.error('An error occurred while retrieving data:', err);
+
+        // For production environments, avoid sending technical error details to the client for security reasons.
         res.status(500).send('An error occurred while retrieving data.');
     }
 });
 
-// Participation data with associated data & media (all records)
+/**
+ * Handles GET requests to fetch all participations with embedded associated data, observations, and media.
+ * @function
+ * @async
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @returns {void}
+ */
 app.get('/participations/embedded', async (req, res) => {
     try {
         const [participations] = await promisePool.query('SELECT * FROM participations');
@@ -45,6 +79,8 @@ app.get('/participations/embedded', async (req, res) => {
         // Fetch the associated data and linked observations and media for each participation
         const promises = participations.map(async (participation) => {
             const data = JSON.parse(participation.data);
+
+            // Assumes REFERENCE_FIELDS is a global constant containing fields needing associated data.
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
@@ -73,10 +109,19 @@ app.get('/participations/embedded', async (req, res) => {
     }
 });
 
-// Raw participation data (single by id)
+/**
+ * Handles GET requests to fetch a participation by its ID.
+ * @function
+ * @async
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @returns {void}
+ */
 app.get('/participations/:id', async (req, res) => {
     const { id } = req.params;
+
     try {
+        // Parameterized query to prevent SQL injection attacks.
         const [rows] = await promisePool.query('SELECT * FROM participations WHERE id = ?', [id]);
         if (rows.length > 0) {
             res.json(rows[0]);
@@ -89,17 +134,25 @@ app.get('/participations/:id', async (req, res) => {
     }
 });
 
-// Participation data with associated data & media (single by id)
+/**
+ * Handles GET requests to fetch a single participation by its ID, embedding the associated data, observations, and media.
+ * @function
+ * @async
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @returns {void}
+ */
 app.get('/participations/:id/embedded', async (req, res) => {
     const { id } = req.params;
 
     try {
+        // Parameterized query to prevent SQL injection attacks.
         const [rows] = await promisePool.query('SELECT * FROM participations WHERE id = ?', [id]);
         if (rows.length > 0) {
             const participation = rows[0];
             const data = JSON.parse(participation.data);
 
-            // Fetch the associated data for each field
+            // Assumes REFERENCE_FIELDS is a global constant containing fields needing associated data.
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
@@ -128,13 +181,21 @@ app.get('/participations/:id/embedded', async (req, res) => {
     }
 });
 
+
+/**
+ * Handles GET requests to fetch and synchronize participation data with associated observations, media, and events.
+ * @function
+ * @async
+ * @param {Object} req - Express request object.
+ * @param {Object} res - Express response object.
+ * @returns {void}
+ */
 app.get('/sync', async (req, res) => {
     try {
         const [participations] = await promisePool.query('SELECT * FROM participations');
 
         const promises = participations.map(async (participation) => {
-            // Fetch the associated data and linked observations and media for each participation
-
+            // Fetch the associated data, linked observations, media, and events for each participation
             const data = JSON.parse(participation.data);
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
@@ -181,8 +242,137 @@ app.get('/sync', async (req, res) => {
         console.error('An error occurred while retrieving data:', err);
         res.status(500).send('An error occurred while retrieving data.');
     }
-})
+});
 
+// -------------------------------
+// REPLICATE
+// -------------------------------
+
+const replicate = new Replicate({
+    auth: process.env.REPLICATE_API_TOKEN,
+});
+
+const TEXT_VERSION = 'de18b8b68ef78f4f52c87eb7e3a0244d18b45b3c67affef2d5055ddc9c2fb678'
+const IMAGE_VERSION = 'b3d14e1cd1f9470bbb0bb68cac48e5f483e5be309551992cc33dc30654a82bb7'
+
+let temp = null;
+
+/**
+ * Endpoint to generate predictions based on query parameters. Supports both text and image types.
+ * 
+ * @route GET /generate
+ * @async
+ * @param {Object} req - The Express request object containing query parameters.
+ * @param {Object} res - The Express response object.
+ * @returns {void}
+ */
+app.get('/generate', async (req, res) => {
+    // Extract query parameters from the request
+    const query = req.query;
+
+    // Handle text-based predictions
+    if (query.type === "text") {
+        // Prepare input data for the prediction model
+        const input = {
+            prompt: query.prompt,
+            system_prompt: query.system_prompt,
+            max_new_tokens: parseInt(query.max_new_tokens),
+            min_new_tokens: parseInt(query.min_new_tokens),
+            temperature: parseFloat(query.temperature),
+            top_k: parseInt(query.top_k),
+            top_p: parseInt(query.top_p)
+        };
+
+        // Create a new prediction using the input data
+        let prediction = await replicate.predictions.create({
+            version: TEXT_VERSION,
+            input: input,
+            webhook: query.webhook
+        });
+
+        // Check for temporary data, concatenate, and send as response
+        if (temp) {
+            var b = temp.join(' ');
+            res.json({ b });
+        }
+
+        // Wait for the prediction to complete with periodic checks
+        prediction = await replicate.wait(prediction, { interval: 250 });
+
+        // Handle prediction errors
+        if (prediction.error) {
+            throw new Error(prediction.error);
+        }
+
+        // Extract and send the prediction output if available
+        const output = prediction.output;
+        if (output) {
+            res.json({ output });
+        }
+
+        // Handle image-based predictions
+    } else if (query.type === "image") {
+        // Prepare input data for the image prediction model
+        const input = {
+            prompt: query.prompt,
+            negative_prompt: query.negative_prompt,
+            width: parseInt(query.width),
+            height: parseInt(query.height)
+        };
+
+        // Create a new image prediction using the input data
+        let prediction = await replicate.predictions.create({
+            version: IMAGE_VERSION,
+            input: input,
+            webhook: query.webhook
+        });
+
+        // Wait for the prediction to complete with periodic checks
+        prediction = await replicate.wait(prediction, { interval: 250 });
+
+        // Handle prediction errors
+        if (prediction.error) {
+            throw new Error(prediction.error);
+        }
+
+        // Extract and send the prediction output if available
+        const output = prediction.output;
+        if (output) {
+            res.json({ output });
+        }
+    } else {
+        res.status(400).send('Invalid prediction type.');
+    }
+});
+
+/**
+ * Endpoint to handle incoming webhooks. Processes the payload and logs the output.
+ * 
+ * @route POST /webhook
+ * @param {Object} req - The Express request object containing the webhook payload.
+ * @param {Object} res - The Express response object.
+ * @returns {void}
+ */
+app.post('/webhook', (req, res) => {
+    // Extract the payload from the request body
+    const payload = req.body;
+
+    // Store the output in a temporary global variable (ensure this is appropriately handled in actual code)
+    temp = payload.output;
+
+    // Respond to the webhook sender with a success status
+    res.sendStatus(200).end();
+});
+
+// -------------------------------
+// GENERAL
+// -------------------------------
+
+/**
+ * Starts the Express application and listens for connections on a specified port.
+ * @function
+ */
 app.listen(port, () => {
     console.log(`App listening at http://localhost:${port}`);
 });
+
