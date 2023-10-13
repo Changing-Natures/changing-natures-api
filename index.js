@@ -101,12 +101,15 @@ app.get('/participations/embedded', async (req, res) => {
         const promises = participations.map(async (participation) => {
             const data = JSON.parse(participation.data);
 
-            // Assumes REFERENCE_FIELDS is a global constant containing fields needing associated data.
+            // Get associated data for relevant fields
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
 
+            // Fetch the linked observations
             const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
+
+            // Fetch the linked observation media and media records for each observation
             const observationPromises = observations.map(async (observation) => {
                 const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
                 const mediaPromises = observationMedia.map(async (media) => {
@@ -142,7 +145,6 @@ app.get('/participations/:id', async (req, res) => {
     const { id } = req.params;
 
     try {
-        // Parameterized query to prevent SQL injection attacks.
         const [rows] = await promisePool.query('SELECT * FROM participations WHERE id = ?', [id]);
         if (rows.length > 0) {
             res.json(rows[0]);
@@ -167,13 +169,12 @@ app.get('/participations/:id/embedded', async (req, res) => {
     const { id } = req.params;
 
     try {
-        // Parameterized query to prevent SQL injection attacks.
         const [rows] = await promisePool.query('SELECT * FROM participations WHERE id = ?', [id]);
         if (rows.length > 0) {
             const participation = rows[0];
             const data = JSON.parse(participation.data);
 
-            // Assumes REFERENCE_FIELDS is a global constant containing fields needing associated data.
+            // Get associated data for relevant fields
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
@@ -216,14 +217,16 @@ app.get('/sync', async (req, res) => {
         const [participations] = await promisePool.query('SELECT * FROM participations');
 
         const promises = participations.map(async (participation) => {
-            // Fetch the associated data, linked observations, media, and events for each participation
+            // Get associated data for relevant fields
             const data = JSON.parse(participation.data);
             for (const field of REFERENCE_FIELDS) {
                 participation.data = await getAssociatedData(data, field);
             }
 
-            // Fetch linked observations and media for each participation
+            // Fetch the linked observations
             const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
+
+            // Fetch the linked observation media and media records for each observation
             const observationPromises = observations.map(async (observation) => {
                 const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
                 const mediaPromises = observationMedia.map(async (media) => {
@@ -367,7 +370,7 @@ app.get('/generate', async (req, res) => {
 });
 
 /**
- * Endpoint to handle incoming webhooks. Processes the payload and logs the output.
+ * Endpoint to handle incoming webhooks. Processes the payload.
  * 
  * @route POST /webhook
  * @param {Object} req - The Express request object containing the webhook payload.
@@ -378,7 +381,7 @@ app.post('/webhook', (req, res) => {
     // Extract the payload from the request body
     const payload = req.body;
 
-    // Store the output in a temporary global variable (ensure this is appropriately handled in actual code)
+    // Store the output in a temporary global variable
     temp = payload.output;
 
     // Respond to the webhook sender with a success status
