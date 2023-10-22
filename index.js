@@ -68,6 +68,55 @@ async function getAssociatedData(data, field) {
 }
 
 /**
+ * Fetches associated events for a given participation ID and returns them in a formatted manner.
+ * 
+ * @async
+ * @function
+ * @param {string|number} participationId - The ID of the participation for which to fetch associated events.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of formatted event objects. Each object contains:
+ */
+async function getEvents(participationId) {
+    // Fetch associated events for each participation
+    const [events] = await promisePool.query('SELECT data, geodata, geocoding_data FROM events WHERE participation_id = ?', [participationId]);
+    return events.map((event) => {
+        const eventData = JSON.parse(event.data);
+        return {
+            _key: uuidv4(),
+            title_fr: eventData.names.fr,
+            title_en: eventData.names.en,
+            title_de: eventData.names.de,
+            startYear: eventData.startYear,
+            endYear: eventData.endYear,
+            geodata: event.geocoding_data || event.geodata,
+        };
+    });
+}
+
+/**
+ * Fetches associated observations for a given participation ID and their related media records.
+ * @async
+ * @function
+ * @param {string|number} participationId - The ID of the participation for which to fetch associated observations.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of observation objects. Each observation object includes:
+ */
+async function getObservations(participationId) {
+    // Fetch the linked observations
+    const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participationId]);
+    // Fetch the linked observation media and media records for each observation
+    const observationPromises = observations.map(async (observation) => {
+        const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
+        const mediaPromises = observationMedia.map(async (media) => {
+            const [mediaRecord] = await promisePool.query('SELECT * FROM medias WHERE id = ?', [media.media_id]);
+            media.mediaRecord = mediaRecord[0];
+        });
+        await Promise.all(mediaPromises);
+        observation.observationMedia = observationMedia;
+    });
+    await Promise.all(observationPromises);
+    return observations;
+}
+
+/**
  * Handles GET requests to fetch all participations.
  * @function
  * @async
@@ -106,21 +155,11 @@ app.get('/participations/embedded', async (req, res) => {
                 participation.data = await getAssociatedData(data, field);
             }
 
-            // Fetch the linked observations
-            const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
+            // Fetch linked observations
+            participation.observations = await getObservations(participation.id);
 
-            // Fetch the linked observation media and media records for each observation
-            const observationPromises = observations.map(async (observation) => {
-                const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
-                const mediaPromises = observationMedia.map(async (media) => {
-                    const [mediaRecord] = await promisePool.query('SELECT * FROM medias WHERE id = ?', [media.media_id]);
-                    media.mediaRecord = mediaRecord[0];
-                });
-                await Promise.all(mediaPromises);
-                observation.observationMedia = observationMedia;
-            });
-            await Promise.all(observationPromises);
-            participation.observations = observations;
+            // Fetch associated events
+            participation.events = await getEvents(participation.id)
 
             return participation;
         });
@@ -179,19 +218,11 @@ app.get('/participations/:id/embedded', async (req, res) => {
                 participation.data = await getAssociatedData(data, field);
             }
 
-            // Fetch the linked observations
-            const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [id]);
+            // Fetch linked observations
+            participation.observations = await getObservations(participation.id);
 
-            // Fetch the linked observation media and media records for each observation
-            for (const observation of observations) {
-                const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
-                observation.observationMedia = observationMedia;
-                for (const media of observationMedia) {
-                    const [mediaRecord] = await promisePool.query('SELECT * FROM medias WHERE id = ?', [media.media_id]);
-                    media.mediaRecord = mediaRecord[0];
-                }
-            }
-            participation.observations = observations;
+            // Fetch associated events
+            participation.events = await getEvents(participation.id)
 
             res.json(participation);
         } else {
@@ -202,7 +233,6 @@ app.get('/participations/:id/embedded', async (req, res) => {
         res.status(500).send('An error occurred while retrieving data.');
     }
 });
-
 
 /**
  * Handles GET requests to fetch and synchronize participation data with associated observations, media, and events.
@@ -223,38 +253,11 @@ app.get('/sync', async (req, res) => {
                 participation.data = await getAssociatedData(data, field);
             }
 
-            // Fetch the linked observations
-            const [observations] = await promisePool.query('SELECT * FROM observations WHERE participation_id = ?', [participation.id]);
+            // Fetch linked observations
+            participation.observations = await getObservations(participation.id);
 
-            // Fetch the linked observation media and media records for each observation
-            const observationPromises = observations.map(async (observation) => {
-                const [observationMedia] = await promisePool.query('SELECT * FROM observations_medias WHERE observation_id = ?', [observation.id]);
-                const mediaPromises = observationMedia.map(async (media) => {
-                    const [mediaRecord] = await promisePool.query('SELECT * FROM medias WHERE id = ?', [media.media_id]);
-                    media.mediaRecord = mediaRecord[0];
-                });
-                await Promise.all(mediaPromises);
-                observation.observationMedia = observationMedia;
-            });
-            await Promise.all(observationPromises);
-            participation.observations = observations;
-
-            // Fetch associated events for each participation
-            const [events] = await promisePool.query('SELECT data, geodata, geocoding_data FROM events WHERE participation_id = ?', [participation.id]);
-
-            const parsedEvents = events.map((event) => {
-                const eventData = JSON.parse(event.data);
-                return {
-                    _key: uuidv4(),
-                    title_fr: eventData.names.fr,
-                    title_en: eventData.names.en,
-                    title_de: eventData.names.de,
-                    startYear: eventData.startYear,
-                    endYear: eventData.endYear,
-                    geodata: event.geocoding_data || event.geodata,
-                };
-            });
-            participation.events = parsedEvents;
+            // Fetch associated events
+            participation.events = await getEvents(participation.id)
 
             return participation;
         });
