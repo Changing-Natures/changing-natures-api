@@ -2,10 +2,15 @@ require('dotenv').config();
 const Replicate = require("replicate");
 const express = require('express');
 const { syncSanity } = require('./sanity');
+const cors = require('cors')
 const mysql = require('mysql2');
 const app = express();
 const port = 3000;
 const { v4: uuidv4 } = require('uuid');
+
+// CORS
+app.use(cors());
+
 
 // -------------------------------
 // CHANGING NATURES DATABASE
