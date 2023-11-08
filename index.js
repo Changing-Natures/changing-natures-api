@@ -1,5 +1,6 @@
 require('dotenv').config();
 const Replicate = require("replicate");
+const OpenAI = require("openai");
 const express = require('express');
 const { syncSanity } = require('./sanity');
 const cors = require('cors')
@@ -277,6 +278,14 @@ app.get('/sync', async (req, res) => {
 });
 
 // -------------------------------
+// OPEN AI
+// -------------------------------
+
+const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+// -------------------------------
 // REPLICATE
 // -------------------------------
 
@@ -284,8 +293,7 @@ const replicate = new Replicate({
     auth: process.env.REPLICATE_API_TOKEN,
 });
 
-const TEXT_VERSION = 'de18b8b68ef78f4f52c87eb7e3a0244d18b45b3c67affef2d5055ddc9c2fb678'
-const IMAGE_VERSION = 'b3d14e1cd1f9470bbb0bb68cac48e5f483e5be309551992cc33dc30654a82bb7'
+const IMAGE_VERSION = '2a865c9a94c9992b6689365b75db2d678d5022505ed3f63a5f53929a31a46947'
 
 let temp = null;
 
@@ -308,39 +316,35 @@ app.get('/generate', async (req, res) => {
         const input = {
             prompt: query.prompt,
             system_prompt: query.system_prompt,
-            max_new_tokens: parseInt(query.max_new_tokens),
-            min_new_tokens: parseInt(query.min_new_tokens),
             temperature: parseFloat(query.temperature),
-            top_k: parseInt(query.top_k),
-            top_p: parseInt(query.top_p)
-        };
-
-        // Create a new prediction using the input data
-        let prediction = await replicate.predictions.create({
-            version: TEXT_VERSION,
-            input: input,
-            webhook: query.webhook
+            model: query.model
+        }
+      
+        // Create prediction
+        const textCompletion = await openai.chat.completions.create({
+            messages: [{ role: "system", content: input.system_prompt }, { role: "user", content: input.prompt }],
+            model: input.model,
+            temperature: input.temperature,
+            max_tokens:210,
+            top_p:1,
+            frequency_penalty:0,
+            presence_penalty:0
+        }).catch((err) => {
+            // Error Handling
+            if (err instanceof OpenAI.APIError) {
+              console.error(err.status); // 400
+              console.error(err.name); // BadRequestError
+              console.error(err.headers); // {server: 'nginx', ...}
+              console.error(err.message);
+              throw new Error(err);
+            } else {
+              throw new Error(err);
+            }
         });
+        
+        // Return result
+        res.json({text: textCompletion.choices[0].message.content})
 
-        // Check for temporary data, concatenate, and send as response
-        if (temp) {
-            var b = temp.join(' ');
-            res.json({ b });
-        }
-
-        // Wait for the prediction to complete with periodic checks
-        prediction = await replicate.wait(prediction, { interval: 250 });
-
-        // Handle prediction errors
-        if (prediction.error) {
-            throw new Error(prediction.error);
-        }
-
-        // Extract and send the prediction output if available
-        const output = prediction.output;
-        if (output) {
-            res.json({ output });
-        }
 
         // Handle image-based predictions
     } else if (query.type === "image") {
@@ -349,7 +353,8 @@ app.get('/generate', async (req, res) => {
             prompt: query.prompt,
             negative_prompt: query.negative_prompt,
             width: parseInt(query.width),
-            height: parseInt(query.height)
+            height: parseInt(query.height),
+            num_inference_steps: 25
         };
 
         // Create a new image prediction using the input data
