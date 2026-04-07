@@ -66,6 +66,8 @@ async function handleTextGeneration(query: TextQuery): Promise<Response> {
     presence_penalty: 0,
   });
 
+  console.log("OpenAI response:", JSON.stringify(textCompletion, null, 2));
+
   const result: TextResponse = {
     text: textCompletion.choices[0].message.content ?? "",
   };
