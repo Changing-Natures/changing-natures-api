@@ -326,6 +326,7 @@ app.get('/generate', async (req, res) => {
             model: input.model,
             temperature: input.temperature,
             max_completion_tokens:1024,
+            reasoning_effort:"low",
             top_p:1,
             frequency_penalty:0,
             presence_penalty:0

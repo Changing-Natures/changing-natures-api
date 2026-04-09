@@ -61,6 +61,7 @@ async function handleTextGeneration(query: TextQuery): Promise<Response> {
     model: query.model,
     temperature: parseFloat(query.temperature),
     max_completion_tokens: 1024,
+    reasoning_effort: "low",
     top_p: 1,
     frequency_penalty: 0,
     presence_penalty: 0,
